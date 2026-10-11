@@ -78,7 +78,6 @@ export class InfraStack extends cdk.Stack {
       },
     });
 
-    // Permisos de Lambda API
     uploads.grantPut(apiFn);
     jobs.grantReadWriteData(apiFn);
 
@@ -98,20 +97,17 @@ export class InfraStack extends cdk.Stack {
       },
     });
 
-    // Conectar API Gateway con Lambda
     const integration = new HttpLambdaIntegration(
       'ApiIntegration',
       apiFn
     );
 
-    // POST /jobs
     api.addRoutes({
       path: '/jobs',
       methods: [apigwv2.HttpMethod.POST],
       integration,
     });
 
-    // GET /jobs/{jobId}
     api.addRoutes({
       path: '/jobs/{jobId}',
       methods: [apigwv2.HttpMethod.GET],
@@ -139,11 +135,22 @@ export class InfraStack extends cdk.Stack {
       },
     });
 
+    // Permiso para leer Jamendo client_id desde SSM
     procesar.addToRolePolicy(
       new iam.PolicyStatement({
         actions: ['ssm:GetParameter'],
         resources: [
           `arn:aws:ssm:${this.region}:${this.account}:parameter/funny-videos/jamendo-client-id`,
+        ],
+      })
+    );
+
+    // Permiso para Nova Web Grounding
+    procesar.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['bedrock:InvokeTool'],
+        resources: [
+          `arn:aws:bedrock::${this.account}:system-tool/amazon.nova_grounding`,
         ],
       })
     );
