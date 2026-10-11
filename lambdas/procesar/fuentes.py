@@ -22,12 +22,21 @@ def obtener_memes_imgflip():
         }
     )
 
-    with urllib.request.urlopen(request, timeout=10) as response:
+    with urllib.request.urlopen(
+        request,
+        timeout=10
+    ) as response:
         data = json.loads(
             response.read().decode("utf-8")
         )
 
-    memes = data.get("data", {}).get("memes", [])
+    memes = data.get(
+        "data",
+        {}
+    ).get(
+        "memes",
+        []
+    )
 
     return [
         {
@@ -51,6 +60,31 @@ def obtener_jamendo_client_id():
 def obtener_musica(tags, velocidad):
     client_id = obtener_jamendo_client_id()
 
+    def buscar(params):
+        url = (
+            "https://api.jamendo.com/v3.0/tracks/?"
+            + urllib.parse.urlencode(params)
+        )
+
+        request = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0"
+            }
+        )
+
+        with urllib.request.urlopen(
+            request,
+            timeout=30
+        ) as response:
+            data = json.loads(
+                response.read().decode("utf-8")
+            )
+
+        return data.get("results", [])
+
+    # Intento 1:
+    # tags + velocidad + instrumental
     params = {
         "client_id": client_id,
         "format": "json",
@@ -61,22 +95,48 @@ def obtener_musica(tags, velocidad):
         "fuzzytags": " ".join(tags),
     }
 
-    url = (
-        "https://api.jamendo.com/v3.0/tracks/?"
-        + urllib.parse.urlencode(params)
-    )
+    resultados = buscar(params)
 
-    request = urllib.request.Request(
-        url,
-        headers={
-            "User-Agent": "Mozilla/5.0"
-        }
-    )
-
-    with urllib.request.urlopen(request, timeout=30) as response:
-        data = json.loads(
-            response.read().decode("utf-8")
+    # Intento 2:
+    # quitar velocidad
+    if not resultados:
+        print(
+            "Jamendo: sin resultados con velocidad, "
+            "reintentando solo con tags"
         )
+
+        params.pop(
+            "speed",
+            None
+        )
+
+        resultados = buscar(params)
+
+    # Intento 3:
+    # usar solo el primer tag
+    if not resultados and tags:
+        print(
+            "Jamendo: sin resultados con todos los tags, "
+            "reintentando con un solo tag"
+        )
+
+        params["fuzzytags"] = tags[0]
+
+        resultados = buscar(params)
+
+    # Intento 4:
+    # cualquier instrumental
+    if not resultados:
+        print(
+            "Jamendo: usando fallback instrumental"
+        )
+
+        params.pop(
+            "fuzzytags",
+            None
+        )
+
+        resultados = buscar(params)
 
     return [
         {
@@ -85,7 +145,10 @@ def obtener_musica(tags, velocidad):
             "duration": track.get("duration"),
             "audio": track.get("audio"),
             "shareurl": track.get("shareurl"),
-            "license_ccurl": track.get("license_ccurl", ""),
+            "license_ccurl": track.get(
+                "license_ccurl",
+                ""
+            ),
         }
-        for track in data.get("results", [])
+        for track in resultados
     ]

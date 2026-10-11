@@ -1,3 +1,5 @@
+from fuentes import obtener_memes, obtener_musica
+
 import json
 import os
 import urllib.parse
@@ -93,11 +95,96 @@ def extraer_json(texto):
     if inicio == -1 or fin == -1:
         raise ValueError("Bedrock no devolvió un JSON válido")
 
-    return json.loads(texto[inicio:fin + 1])
+    return json.loads(
+        texto[inicio:fin + 1]
+    )
+
+
+def investigar_tendencias(ficha):
+    resumen = ficha.get(
+        "resumen",
+        ""
+    )
+
+    situaciones = ficha.get(
+        "situaciones_memeables",
+        []
+    )
+
+    prompt = f"""
+Busca en la web tendencias actuales de memes o audios
+que puedan funcionar para este video corto.
+
+Resumen del video:
+{resumen}
+
+Situaciones memeables:
+{json.dumps(situaciones, ensure_ascii=False)}
+
+Dame:
+1. Hasta 5 memes o formatos de reacción que encajen.
+2. Hasta 3 audios o estilos de audio en tendencia.
+
+Sé breve y usa información actual.
+"""
+
+    resp = bedrock.converse(
+        modelId=MODEL_ID,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "text": prompt
+                    }
+                ]
+            }
+        ],
+        toolConfig={
+            "tools": [
+                {
+                    "systemTool": {
+                        "name": "nova_grounding"
+                    }
+                }
+            ]
+        },
+    )
+
+    textos = []
+    citas = []
+
+    for bloque in resp["output"]["message"]["content"]:
+
+        if "text" in bloque:
+            textos.append(
+                bloque["text"]
+            )
+
+        if "citationsContent" in bloque:
+
+            for cita in bloque["citationsContent"]["citations"]:
+
+                web = (
+                    cita
+                    .get("location", {})
+                    .get("web", {})
+                )
+
+                url = web.get("url")
+
+                if url:
+                    citas.append(url)
+    citas=list(dict.fromkeys(citas))
+    return "\n".join(textos), citas
 
 
 def handler(event, context):
-    for record in event.get("Records", []):
+
+    for record in event.get(
+        "Records",
+        []
+    ):
         procesar_record(record)
 
     return {
@@ -107,6 +194,7 @@ def handler(event, context):
 
 
 def procesar_record(record):
+
     bucket = record["s3"]["bucket"]["name"]
 
     key = urllib.parse.unquote_plus(
@@ -116,13 +204,21 @@ def procesar_record(record):
     partes = key.split("/")
 
     if len(partes) < 3 or partes[0] != "uploads":
-        print(f"Ignorando key inesperada: {key}")
+
+        print(
+            f"Ignorando key inesperada: {key}"
+        )
+
         return
 
     job_id = partes[1]
 
+    # =========================
+    # Evitar procesar dos veces
+    # =========================
+
     try:
-        # Evitar procesar dos veces el mismo evento de S3
+
         table.update_item(
             Key={
                 "jobId": job_id
@@ -139,18 +235,26 @@ def procesar_record(record):
         )
 
     except ClientError as error:
+
         codigo = error.response["Error"]["Code"]
 
         if codigo == "ConditionalCheckFailedException":
+
             print(
                 f"Job {job_id} ya fue procesado "
                 "o no está en PENDING_UPLOAD"
             )
+
             return
 
         raise
 
+    # =========================
+    # Procesamiento principal
+    # =========================
+
     try:
+
         job = table.get_item(
             Key={
                 "jobId": job_id
@@ -158,17 +262,29 @@ def procesar_record(record):
         ).get("Item")
 
         if not job:
+
             raise ValueError(
                 f"No existe el job {job_id}"
             )
 
-        prompt_usuario = job.get("prompt", "")
+        prompt_usuario = job.get(
+            "prompt",
+            ""
+        )
 
         prompt = PROMPT_FICHA.format(
             prompt_usuario=prompt_usuario
         )
 
-        formato = "mov" if key.lower().endswith(".mov") else "mp4"
+        formato = (
+            "mov"
+            if key.lower().endswith(".mov")
+            else "mp4"
+        )
+
+        # =========================
+        # 1. Analizar video
+        # =========================
 
         resp = bedrock.converse(
             modelId=MODEL_ID,
@@ -181,7 +297,9 @@ def procesar_record(record):
                                 "format": formato,
                                 "source": {
                                     "s3Location": {
-                                        "uri": f"s3://{bucket}/{key}",
+                                        "uri": (
+                                            f"s3://{bucket}/{key}"
+                                        ),
                                         "bucketOwner": ACCOUNT_ID
                                     }
                                 }
@@ -201,10 +319,15 @@ def procesar_record(record):
         texto = ""
 
         for bloque in resp["output"]["message"]["content"]:
+
             if "text" in bloque:
                 texto += bloque["text"]
 
         ficha = extraer_json(texto)
+
+        # =========================
+        # 2. Guardar ficha
+        # =========================
 
         table.update_item(
             Key={
@@ -219,12 +342,91 @@ def procesar_record(record):
             }
         )
 
-        print(
-            f"Ficha generada correctamente "
-            f"para job {job_id}"
+        # =========================
+        # 3. Cambiar a SEARCHING
+        # =========================
+
+        table.update_item(
+            Key={
+                "jobId": job_id
+            },
+            UpdateExpression="SET #s = :s",
+            ExpressionAttributeNames={
+                "#s": "status"
+            },
+            ExpressionAttributeValues={
+                ":s": "SEARCHING"
+            }
         )
 
+        # =========================
+        # 4. Buscar memes
+        # =========================
+
+        memes = obtener_memes()
+
+        # =========================
+        # 5. Buscar música
+        # =========================
+
+        busqueda_musica = ficha.get(
+            "busqueda_musica",
+            {}
+        )
+
+        tags = busqueda_musica.get(
+            "tags_en_ingles",
+            ["funny"]
+        )
+
+        velocidad = busqueda_musica.get(
+            "velocidad",
+            "medium"
+        )
+
+        pistas = obtener_musica(
+            tags,
+            velocidad
+        )
+
+        # =========================
+        # 6. Web Grounding
+        # =========================
+
+        investigacion, citas = investigar_tendencias(
+            ficha
+        )
+
+        # =========================
+        # 7. Logs temporales
+        # =========================
+
+        print(
+            "MEMES:",
+            len(memes)
+        )
+
+        print(
+            "PISTAS:",
+            len(pistas)
+        )
+
+        print(
+            "INVESTIGACION:",
+            investigacion[:500]
+        )
+
+        print(
+            "CITAS:",
+            citas
+        )
+
+    # =========================
+    # Manejo de errores
+    # =========================
+
     except Exception as error:
+
         print(
             f"Error procesando job {job_id}: {error}"
         )
@@ -233,7 +435,10 @@ def procesar_record(record):
             Key={
                 "jobId": job_id
             },
-            UpdateExpression="SET #s = :estado, #e = :error",
+            UpdateExpression=(
+                "SET #s = :estado, "
+                "#e = :error"
+            ),
             ExpressionAttributeNames={
                 "#s": "status",
                 "#e": "error"
