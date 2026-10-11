@@ -139,6 +139,15 @@ export class InfraStack extends cdk.Stack {
       },
     });
 
+    procesar.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['ssm:GetParameter'],
+        resources: [
+          `arn:aws:ssm:${this.region}:${this.account}:parameter/funny-videos/jamendo-client-id`,
+        ],
+      })
+    );
+
     // Permisos de ProcesarFn
     uploads.grantRead(procesar);
     jobs.grantReadWriteData(procesar);
