@@ -12,6 +12,7 @@ export default function Home() {
 
   const [jobStatus, setJobStatus] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [result, setResult] = useState<any>(null);
 
   const previewUrl = useMemo(() => {
     if (!file) return null;
@@ -63,6 +64,7 @@ export default function Home() {
   
       if (job.status === "DONE") {
         setIsProcessing(false);
+        setResult(job);
         console.log("Resultado final:", job);
         return job;
       }
@@ -73,6 +75,15 @@ export default function Home() {
       }
   
       await new Promise((resolve) => setTimeout(resolve, 3000));
+    }
+  }
+  function parseJson(value: string | undefined) {
+    if (!value) return null;
+  
+    try {
+      return JSON.parse(value);
+    } catch {
+      return null;
     }
   }
 
@@ -138,13 +149,16 @@ export default function Home() {
       console.log("Video subido correctamente");
       await pollJob(data.jobId, apiUrl);
   
-      alert(`Job creado: ${data.jobId}`);
     } catch (error) {
       console.error(error);
       setIsProcessing(false);
       alert("No se pudo completar el análisis.");
     }
   }
+  const fuentes = parseJson(result?.fuentes);
+  const ficha = parseJson(result?.ficha);
+  const brief = parseJson(result?.brief);
+  
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#151515] text-[#F5F5F5]">
       {/* Atmosphere */}
@@ -398,6 +412,190 @@ export default function Home() {
             </div>
           </section>
         </form>
+        {result && brief && ficha && (
+  <section className="mt-8 rounded-[1.75rem] border border-[rgba(255,255,255,0.12)] bg-[#1E1E1E] p-6 sm:p-8">
+    <div className="mb-6">
+      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#B7F34A]">
+        Resultado
+      </p>
+
+      <h2 className="mt-2 text-3xl font-bold text-[#F5F5F5]">
+        {brief.concepto?.titulo || "Análisis completado"}
+      </h2>
+
+      <p className="mt-3 max-w-3xl text-[#B3B3B3]">
+        {brief.concepto?.angulo}
+      </p>
+    </div>
+
+    <div className="grid gap-5 md:grid-cols-2">
+      <div className="rounded-2xl bg-[#252525] p-5">
+        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#B7F34A]">
+          Resumen del video
+        </p>
+
+        <p className="mt-3 leading-relaxed text-[#F5F5F5]">
+          {ficha.resumen}
+        </p>
+      </div>
+
+      <div className="rounded-2xl bg-[#252525] p-5">
+        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#F6C84C]">
+          Tono
+        </p>
+
+        <p className="mt-3 text-[#F5F5F5]">
+          {brief.concepto?.tono || ficha.tono_natural}
+        </p>
+      </div>
+    </div>
+
+    {brief.publicacion?.caption && (
+      <div className="mt-5 rounded-2xl border border-[rgba(255,255,255,0.12)] bg-[#252525] p-5">
+        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#B7F34A]">
+          Caption sugerido
+        </p>
+
+        <p className="mt-3 leading-relaxed text-[#F5F5F5]">
+          {brief.publicacion.caption}
+        </p>
+      </div>
+    )}
+    {brief.guion?.length > 0 && (
+  <div className="mt-6">
+    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#B7F34A]">
+      Timeline
+    </p>
+
+    <div className="mt-3 space-y-3">
+      {brief.guion.map((beat: any) => (
+        <div
+          key={beat.beat}
+          className="rounded-2xl border border-white/10 bg-[#252525] p-4"
+        >
+          <div className="flex items-center justify-between gap-4">
+            <span className="font-semibold text-[#F5F5F5]">
+              Beat {beat.beat}
+            </span>
+
+            <span className="text-xs text-[#B3B3B3]">
+              {beat.t_inicio}s – {beat.t_fin}s
+            </span>
+          </div>
+
+          <p className="mt-2 text-sm text-[#D4D4D4]">
+            {beat.que_pasa}
+          </p>
+
+          {beat.texto_en_pantalla && (
+            <p className="mt-2 text-sm text-[#F6C84C]">
+              {beat.texto_en_pantalla}
+            </p>
+          )}
+        </div>
+      ))}
+    </div>
+  </div>
+)}
+{brief.memes?.length > 0 && (
+  <div className="mt-6">
+    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#B7F34A]">
+      Memes sugeridos
+    </p>
+
+    <div className="mt-3 grid gap-4 md:grid-cols-2">
+      {brief.memes.map((meme: any, index: number) => (
+        <div
+          key={`${meme.nombre}-${index}`}
+          className="rounded-2xl bg-[#252525] p-4"
+        >
+          <p className="font-semibold text-[#F5F5F5]">
+            {meme.nombre}
+          </p>
+
+          <p className="mt-2 text-sm text-[#B3B3B3]">
+            {meme.por_que}
+          </p>
+
+          {meme.url && (
+            <a
+              href={meme.url}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-3 inline-block text-sm text-[#B7F34A] hover:underline"
+            >
+              Ver meme
+            </a>
+          )}
+        </div>
+      ))}
+    </div>
+  </div>
+)}
+{brief.musica?.length > 0 && (
+  <div className="mt-6">
+    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#F6C84C]">
+      Música sugerida
+    </p>
+
+    <div className="mt-3 space-y-3">
+      {brief.musica.map((track: any, index: number) => (
+        <div
+          key={`${track.titulo}-${index}`}
+          className="rounded-2xl bg-[#252525] p-4"
+        >
+          <p className="font-semibold text-[#F5F5F5]">
+            {track.titulo}
+          </p>
+
+          <p className="mt-1 text-sm text-[#B3B3B3]">
+            {track.artist_name}
+          </p>
+
+          {track.por_que && (
+            <p className="mt-2 text-sm text-[#D4D4D4]">
+              {track.por_que}
+            </p>
+          )}
+
+          {track.url && (
+            <a
+              href={track.url}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-3 inline-block text-sm text-[#B7F34A] hover:underline"
+            >
+              Escuchar
+            </a>
+          )}
+        </div>
+      ))}
+    </div>
+  </div>
+)}
+{fuentes?.length > 0 && (
+  <div className="mt-6">
+    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#B3B3B3]">
+      Fuentes
+    </p>
+
+    <div className="mt-3 space-y-2">
+      {fuentes.map((fuente: string, index: number) => (
+        <a
+          key={`${fuente}-${index}`}
+          href={fuente}
+          target="_blank"
+          rel="noreferrer"
+          className="block break-all text-sm text-[#B7F34A] hover:underline"
+        >
+          {fuente}
+        </a>
+      ))}
+    </div>
+  </div>
+)}
+  </section>
+)}
       </div>
     </main>
   );
