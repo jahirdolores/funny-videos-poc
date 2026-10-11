@@ -10,6 +10,9 @@ export default function Home() {
   const [prompt, setPrompt] = useState("");
   const [tone, setTone] = useState<string>("");
 
+  const [jobStatus, setJobStatus] = useState<string | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
+
   const previewUrl = useMemo(() => {
     if (!file) return null;
     return URL.createObjectURL(file);
@@ -42,26 +45,106 @@ export default function Home() {
     selectFile(event.dataTransfer.files?.[0]);
   }
 
-  function handleSubmit(event: FormEvent) {
-    event.preventDefault();
+  async function pollJob(jobId: string, apiUrl: string) {
+    while (true) {
+      const response = await fetch(`${apiUrl}/jobs/${jobId}`);
+  
+      if (!response.ok) {
+        throw new Error(
+          `Error consultando job: ${response.status}`
+        );
+      }
+  
+      const job = await response.json();
+  
+      console.log("Estado:", job.status);
+  
+      setJobStatus(job.status);
+  
+      if (job.status === "DONE") {
+        setIsProcessing(false);
+        console.log("Resultado final:", job);
+        return job;
+      }
+  
+      if (job.status === "FAILED") {
+        setIsProcessing(false);
+        throw new Error("El procesamiento del video falló.");
+      }
+  
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+    }
+  }
 
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+  
     if (!file) {
       alert("Selecciona un video.");
       return;
     }
-
+  
     if (!prompt.trim()) {
       alert("Escribe qué quieres lograr.");
       return;
     }
+  
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+  
+    if (!apiUrl) {
+      alert("Falta configurar NEXT_PUBLIC_API_URL.");
+      return;
+    }
+    setIsProcessing(true);
+    setJobStatus("PENDING_UPLOAD");
+  
+    try {
+      const response = await fetch(`${apiUrl}/jobs`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          prompt:
+            tone.length > 0
+              ? `${prompt.trim()}. Tono deseado: ${tone}.`
+              : prompt.trim(),
+          contentType: file.type,
+        }),
+      });
+  
+      if (!response.ok) {
+        throw new Error(
+          `Error creando job: ${response.status}`
+        );
+      }
+  
+      const data = await response.json();
 
-    console.log({
-      file,
-      prompt,
-      tone,
-    });
+      const uploadResponse = await fetch(data.uploadUrl, {
+        method: "PUT",
+        headers: {
+          "Content-Type": file.type,
+        },
+        body: file,
+      });
+      
+      if (!uploadResponse.ok) {
+        throw new Error(
+          `Error subiendo video: ${uploadResponse.status}`
+        );
+      }
+      
+      console.log("Video subido correctamente");
+      await pollJob(data.jobId, apiUrl);
+  
+      alert(`Job creado: ${data.jobId}`);
+    } catch (error) {
+      console.error(error);
+      setIsProcessing(false);
+      alert("No se pudo completar el análisis.");
+    }
   }
-
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#151515] text-[#F5F5F5]">
       {/* Atmosphere */}
@@ -279,23 +362,39 @@ export default function Home() {
             <div className="relative mt-auto pt-8">
               <button
                 type="submit"
-                disabled={!file || !prompt.trim()}
+                disabled={!file || !prompt.trim() || isProcessing}
                 className="group/cta relative w-full overflow-hidden rounded-2xl bg-gradient-to-r from-[#B7F34A] via-[#C8F25A] to-[#F6C84C] px-5 py-4 text-[15px] font-bold tracking-tight text-[#151515] shadow-[0_14px_36px_-14px_rgba(183,243,74,0.55)] transition duration-200 hover:brightness-105 active:scale-[0.99] disabled:cursor-not-allowed disabled:bg-none disabled:bg-[#252525] disabled:text-[#B3B3B3] disabled:shadow-none disabled:brightness-100"
               >
                 <span className="relative z-10 inline-flex items-center justify-center gap-2">
-                  Analizar video
-                  <span
-                    aria-hidden
-                    className="transition-transform duration-200 group-hover/cta:translate-x-0.5 group-disabled/cta:translate-x-0"
-                  >
-                    →
-                  </span>
+                  {isProcessing ? "Analizando..." : "Analizar video"}
+
+                  {!isProcessing && (
+                    <span
+                      aria-hidden
+                      className="transition-transform duration-200 group-hover/cta:translate-x-0.5 group-disabled/cta:translate-x-0"
+                    >
+                      →
+                    </span>
+                  )}
                 </span>
               </button>
 
-              <p className="mt-3 text-center text-xs text-[#B3B3B3]">
-                El análisis puede tardar algunos segundos.
-              </p>
+              {jobStatus && (
+                <div className="mt-4 text-center text-sm text-[#B7F34A]">
+                  {jobStatus === "PENDING_UPLOAD" && "Subiendo video..."}
+                  {jobStatus === "ANALYZING" && "Analizando humor..."}
+                  {jobStatus === "SEARCHING" && "Buscando memes y música..."}
+                  {jobStatus === "WRITING" && "Preparando resultado..."}
+                  {jobStatus === "DONE" && "¡Análisis listo!"}
+                  {jobStatus === "FAILED" && "Ocurrió un error."}
+                </div>
+              )}
+
+              {jobStatus !== "DONE" && (
+                <p className="mt-3 text-center text-xs text-[#B3B3B3]">
+                  El análisis puede tardar algunos segundos.
+                </p>
+              )}
             </div>
           </section>
         </form>
