@@ -87,6 +87,92 @@ Lo que quiere lograr la persona:
 {prompt_usuario}
 """
 
+PROMPT_BRIEF = """
+Eres guionista de videos cortos de humor para redes sociales.
+
+Escribe en español de México.
+
+Tu trabajo es proponer UNA idea concreta, original y realizable
+para editar el video descrito abajo.
+
+Reglas:
+- El video original es el protagonista.
+- No inventes acciones que no aparecen en la ficha.
+- Cada meme debe entrar en un momento real del video.
+- No uses más de un meme cada 4 segundos.
+- Explica brevemente por qué funciona cada meme.
+- La música debe elegirse SOLO de las pistas proporcionadas.
+- No inventes URLs.
+- No inventes nombres de pistas.
+- Si usas una tendencia encontrada en la investigación,
+  debe tener relación con el contenido del video.
+- El humor no debe burlarse cruelmente de la persona o mascota.
+- Devuelve SOLO JSON válido.
+
+Devuelve exactamente esta estructura:
+
+{{
+  "concepto": {{
+    "titulo": "",
+    "angulo": "",
+    "tono": "",
+    "por_que_funciona": ""
+  }},
+  "guion": [
+    {{
+      "beat": 1,
+      "t_inicio": 0,
+      "t_fin": 0,
+      "que_pasa": "",
+      "texto_en_pantalla": ""
+    }}
+  ],
+  "memes": [
+    {{
+      "nombre": "",
+      "tipo": "pip|insert|fullscreen|audio|caption",
+      "t": 0,
+      "por_que": "",
+      "url": ""
+    }}
+  ],
+  "musica": [
+    {{
+      "titulo": "",
+      "artista": "",
+      "uso": "fondo",
+      "por_que": "",
+      "url": "",
+      "licencia": ""
+    }}
+  ],
+  "audio_en_tendencia": [
+    {{
+      "nombre": "",
+      "nota": ""
+    }}
+  ],
+  "publicacion": {{
+    "caption": "",
+    "hashtags": []
+  }}
+}}
+
+LO QUE PIDIÓ LA PERSONA:
+{prompt_usuario}
+
+FICHA DEL VIDEO:
+{ficha}
+
+MEMES DISPONIBLES:
+{memes}
+
+PISTAS DISPONIBLES:
+{pistas}
+
+INVESTIGACIÓN ACTUAL:
+{investigacion}
+"""
 
 def extraer_json(texto):
     inicio = texto.find("{")
@@ -178,6 +264,54 @@ Sé breve y usa información actual.
     citas=list(dict.fromkeys(citas))
     return "\n".join(textos), citas
 
+def generar_brief(
+    prompt_usuario,
+    ficha,
+    memes,
+    pistas,
+    investigacion
+):
+    prompt = PROMPT_BRIEF.format(
+        prompt_usuario=prompt_usuario,
+        ficha=json.dumps(
+            ficha,
+            ensure_ascii=False
+        ),
+        memes=json.dumps(
+            memes,
+            ensure_ascii=False
+        ),
+        pistas=json.dumps(
+            pistas,
+            ensure_ascii=False
+        ),
+        investigacion=investigacion
+    )
+
+    resp = bedrock.converse(
+        modelId=MODEL_ID,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "text": prompt
+                    }
+                ]
+            }
+        ],
+        inferenceConfig={
+            "maxTokens": 3000
+        }
+    )
+
+    texto = ""
+
+    for bloque in resp["output"]["message"]["content"]:
+        if "text" in bloque:
+            texto += bloque["text"]
+
+    return extraer_json(texto)
 
 def handler(event, context):
 
@@ -398,29 +532,66 @@ def procesar_record(record):
         )
 
         # =========================
-        # 7. Logs temporales
+        # 7. Cambiar a WRITING
         # =========================
 
-        print(
-            "MEMES:",
-            len(memes)
+        table.update_item(
+            Key={
+                "jobId": job_id
+            },
+            UpdateExpression="SET #s = :s",
+            ExpressionAttributeNames={
+                "#s": "status"
+            },
+            ExpressionAttributeValues={
+                ":s": "WRITING"
+            }
+        )
+
+        # =========================
+        # 8. Generar brief final
+        # =========================
+
+        brief = generar_brief(
+            prompt_usuario,
+            ficha,
+            memes,
+            pistas,
+            investigacion
+        )
+
+        # =========================
+        # 9. Guardar resultado final
+        # =========================
+
+        table.update_item(
+            Key={
+                "jobId": job_id
+            },
+            UpdateExpression=(
+                "SET #s = :status, "
+                "brief = :brief, "
+                "fuentes = :fuentes"
+            ),
+            ExpressionAttributeNames={
+                "#s": "status"
+            },
+            ExpressionAttributeValues={
+                ":status": "DONE",
+                ":brief": json.dumps(
+                    brief,
+                    ensure_ascii=False
+                ),
+                ":fuentes": json.dumps(
+                    citas,
+                    ensure_ascii=False
+                )
+            }
         )
 
         print(
-            "PISTAS:",
-            len(pistas)
-        )
-
-        print(
-            "INVESTIGACION:",
-            investigacion[:500]
-        )
-
-        print(
-            "CITAS:",
-            citas
-        )
-
+            f"Job {job_id} terminado correctamente"
+            )
     # =========================
     # Manejo de errores
     # =========================
